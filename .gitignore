@@ -1,218 +1,520 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
+import random
+import json
+import os
+import tkinter as tk
 
-# C extensions
-*.so
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+CELL_SIZE = 20
+GRID_WIDTH = 30
+GRID_HEIGHT = 22
+GAME_SPEED = 110
 
-# PyInstaller
-#   Usually these files are written by a python script from a template
-#   before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+SNAKE_SKINS = {
+	"Classic": ("#9be564", "#3f9448", 0),
+	"Ocean": ("#8de9ff", "#168aad", 8),
+	"Sunset": ("#ffd166", "#ef7b45", 12),
+	"Venom": ("#d7ff4f", "#6b8e23", 16),
+	"Lava": ("#ffb000", "#d62828", 20),
+	"Shadow": ("#d7d9e0", "#424657", 24),
+	"Royal": ("#f2b5d4", "#8e4585", 28),
+}
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+BOARD_SKINS = {
+	"Night": ("#101820", 0),
+	"Forest": ("#183b2b", 8),
+	"Dusk": ("#29213d", 12),
+	"Desert": ("#704214", 16),
+	"Ice": ("#16425b", 20),
+	"Volcano": ("#3d1111", 24),
+	"Neon": ("#111a2e", 28),
+}
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
 
-# Translations
-*.mo
-*.pot
+class SnakeGame:
+	def __init__(self, root):
+		self.root = root
+		self.root.title("Snake and Fury")
+		self.root.resizable(False, False)
+		self.root.attributes("-fullscreen", True)
+		self.root.bind("<Escape>", lambda event: self.root.attributes("-fullscreen", False))
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+		global GRID_WIDTH, GRID_HEIGHT
+		screen_width = self.root.winfo_screenwidth()
+		screen_height = self.root.winfo_screenheight()
+		GRID_WIDTH = max(20, screen_width // CELL_SIZE)
+		GRID_HEIGHT = max(15, (screen_height - 75) // CELL_SIZE)
+		self.save_path = os.path.join(os.path.dirname(__file__), "snake_save.json")
+		self.load_save()
+		self.setup_home()
+		self.setup_game()
 
-# Flask stuff:
-instance/
-.webassets-cache
+		self.root.bind("<KeyPress>", self.change_direction)
+		self.root.bind("<KeyPress-q>", lambda event: self.root.destroy())
+		self.root.bind("<KeyPress-Q>", lambda event: self.root.destroy())
 
-# Scrapy stuff:
-.scrapy
+		self.root.bind("<KeyPress-h>", lambda event: self.show_home())
+		self.root.bind("<KeyPress-H>", lambda event: self.show_home())
+	def load_save(self):
+		self.coins = 9999
+		self.purchased_snakes = {"Classic"}
+		self.purchased_boards = {"Night"}
+		self.selected_snake = "Classic"
+		self.selected_board = "Night"
+		try:
+			with open(self.save_path, "r", encoding="utf-8") as save_file:
+				data = json.load(save_file)
+			self.coins = data.get("coins", self.coins)
+			self.purchased_snakes.update(data.get("purchased_snakes", []))
+			self.purchased_boards.update(data.get("purchased_boards", []))
+			self.selected_snake = data.get("selected_snake", self.selected_snake)
+			self.selected_board = data.get("selected_board", self.selected_board)
+		except (OSError, ValueError):
+			pass
 
-# Sphinx documentation
-docs/_build/
+	def save_progress(self):
+		data = {
+			"coins": self.coins,
+			"purchased_snakes": list(self.purchased_snakes),
+			"purchased_boards": list(self.purchased_boards),
+			"selected_snake": self.selected_snake,
+			"selected_board": self.selected_board,
+		}
+		try:
+			with open(self.save_path, "w", encoding="utf-8") as save_file:
+				json.dump(data, save_file, indent=2)
+		except OSError:
+			pass
 
-# PyBuilder
-.pybuilder/
-target/
+	def setup_home(self):
+		self.home_frame = tk.Frame(self.root, bg="#17212b")
+		self.home_frame.pack(fill="both", expand=True)
+		tk.Label(
+			self.home_frame,
+			text="SNAKE AND FURY",
+			font=("Impact", 42),
+			fg="#9be564",
+			bg="#17212b",
+		).pack(pady=(120, 10))
+		self.home_coins = tk.Label(self.home_frame, text=f"Coins: {self.coins}", font=("Arial", 16), fg="#ffd166", bg="#17212b")
+		self.home_coins.pack(pady=8)
+		tk.Button(self.home_frame, text="Start Game", command=self.show_game, width=20).pack(pady=8)
+		tk.Button(self.home_frame, text="Store", command=self.open_store, width=20).pack(pady=8)
+		tk.Button(self.home_frame, text="Quit", command=self.root.destroy, width=20).pack(pady=8)
 
-# Jupyter Notebook
-.ipynb_checkpoints
+	def setup_game(self):
+		self.game_frame = tk.Frame(self.root, bg="#17212b")
+		self.score_label = tk.Label(self.game_frame, text=f"Score: 0   Coins: {self.coins}", font=("Arial", 14, "bold"), bg="#17212b", fg="white")
+		self.score_label.pack(pady=(8, 4))
+		self.canvas = tk.Canvas(
+			self.game_frame,
+			width=CELL_SIZE * GRID_WIDTH,
+			height=CELL_SIZE * GRID_HEIGHT,
+			bg="#101820",
+			highlightthickness=0,
+		)
+		self.canvas.pack(padx=8, pady=(0, 8))
+		tk.Button(self.game_frame, text="Home", command=self.show_home, width=10).pack(pady=(0, 8))
 
-# IPython
-profile_default/
-ipython_config.py
+	def show_game(self):
+		self.home_frame.pack_forget()
+		self.game_frame.pack(fill="both", expand=True)
+		self.start_game()
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+	def show_home(self):
+		self.game_over = True
+		self.game_frame.pack_forget()
+		self.home_coins.config(text=f"Coins: {self.coins}")
+		self.home_frame.pack(fill="both", expand=True)
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-# Pipfile.lock
+	def open_store(self):
+		store = tk.Toplevel(self.root)
+		store.title("Snake Store")
+		store.resizable(False, False)
+		store.configure(bg="#17212b")
+		coin_label = tk.Label(store, text=f"Coins: {self.coins}", font=("Arial", 16, "bold"), fg="#ffd166", bg="#17212b")
+		coin_label.pack(pady=12)
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-# uv.lock
+		def make_rows(title, skins, selected_name, category):
+			heading = tk.Label(store, text=title, font=("Arial", 13, "bold"), bg="#17212b", fg="white")
+			heading.is_skin_row = True
+			heading.pack(pady=(8, 2))
+			for name, values in skins.items():
+				price = values[-1]
+				row = tk.Frame(store, bg="#17212b")
+				row.is_skin_row = True
+				row.pack(fill="x", padx=12, pady=3)
+				tk.Label(row, text=f"{name}  ({price} coins)", width=18, anchor="w").pack(side="left")
+				owned = name in (self.purchased_snakes if category == "snake" else self.purchased_boards)
+				button_text = "Selected" if name == selected_name else ("Use" if owned else "Buy")
+				tk.Button(row, text=button_text, width=9, command=lambda n=name, p=price, c=category: self.select_skin(n, p, c, refresh)).pack(side="right")
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-# poetry.lock
-# poetry.toml
+		def refresh():
+			coin_label.config(text=f"Coins: {self.coins}")
+			for child in store.winfo_children():
+				if getattr(child, "is_skin_row", False):
+					child.destroy()
+			make_rows("Snake Skins", SNAKE_SKINS, self.selected_snake, "snake")
+			make_rows("Board Skins", BOARD_SKINS, self.selected_board, "board")
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-# pdm.lock
-# pdm.toml
-.pdm-python
-.pdm-build/
+		store.protocol("WM_DELETE_WINDOW", store.destroy)
 
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-# pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
+		refresh()
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+	def select_skin(self, name, price, category, refresh):
+		purchased = self.purchased_snakes if category == "snake" else self.purchased_boards
+		if name not in purchased:
+			if self.coins < price:
+				return
+			self.coins -= price
+			purchased.add(name)
+		if category == "snake":
+			self.selected_snake = name
+		else:
+			self.selected_board = name
+		self.save_progress()
+		refresh()
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
+	def start_game(self):
+		center = (GRID_WIDTH // 2, GRID_HEIGHT // 2)
+		self.snake = [center, (center[0] - 1, center[1]), (center[0] - 2, center[1])]
+		self.direction = (1, 0)
+		self.next_direction = self.direction
+		self.score = 0
+		self.game_over = False
+		self.death_animation_id = getattr(self, "death_animation_id", 0) + 1
+		self.food = self.place_food()
+		self.coin = self.place_coin()
+		self.score_label.config(text=f"Score: 0   Coins: {self.coins}")
+		self.draw()
+		self.move()
 
-# Redis
-*.rdb
-*.aof
-*.pid
+	def place_food(self):
+		open_cells = [
+			(x, y)
+			for x in range(GRID_WIDTH)
+			for y in range(GRID_HEIGHT)
+			if (x, y) not in self.snake and (x, y) != getattr(self, "coin", None)
+		]
+		return random.choice(open_cells)
 
-# RabbitMQ
-mnesia/
-rabbitmq/
-rabbitmq-data/
+	def place_coin(self):
+		open_cells = [
+			(x, y)
+			for x in range(GRID_WIDTH)
+			for y in range(GRID_HEIGHT)
+			if (x, y) not in self.snake and (x, y) != self.food
+		]
+		return random.choice(open_cells)
 
-# ActiveMQ
-activemq-data/
+	def change_direction(self, event):
+		directions = {
+			"Up": (0, -1),
+			"Down": (0, 1),
+			"Left": (-1, 0),
+			"Right": (1, 0),
+		}
+		new_direction = directions.get(event.keysym)
+		if new_direction and new_direction != (-self.direction[0], -self.direction[1]):
+			self.next_direction = new_direction
 
-# SageMath parsed files
-*.sage.py
+	def move(self):
+		if self.game_over:
+			return
 
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
+		self.direction = self.next_direction
+		head_x, head_y = self.snake[0]
+		new_head = (head_x + self.direction[0], head_y + self.direction[1])
 
-# Spyder project settings
-.spyderproject
-.spyproject
+		hit_wall = not (0 <= new_head[0] < GRID_WIDTH and 0 <= new_head[1] < GRID_HEIGHT)
+		hit_self = new_head in self.snake[:-1]
+		if hit_wall or hit_self:
+			self.end_game()
+			return
 
-# Rope project settings
-.ropeproject
+		self.snake.insert(0, new_head)
+		if new_head == self.food:
+			self.score += 1
+			self.coins += 1
+			self.score_label.config(text=f"Score: {self.score}   Coins: {self.coins}")
+			self.save_progress()
+			self.food = self.place_food()
+		elif new_head == self.coin:
+			self.coins += 1
+			self.score_label.config(text=f"Score: {self.score}   Coins: {self.coins}")
+			self.save_progress()
+			self.coin = self.place_coin()
+		else:
+			self.snake.pop()
 
-# mkdocs documentation
-/site
+		self.draw()
+		self.root.after(GAME_SPEED, self.move)
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+	def draw(self):
+		self.canvas.delete("all")
+		self.canvas.configure(bg=BOARD_SKINS[self.selected_board][0])
+		food_x, food_y = self.food
+		food_left = food_x * CELL_SIZE
+		food_top = food_y * CELL_SIZE
+		self.canvas.create_oval(
+			food_left + 3,
+			food_top + 4,
+			food_left + CELL_SIZE - 3,
+			food_top + CELL_SIZE - 2,
+			fill="#d93636",
+			outline="#ff8989",
+			width=1,
+		)
+		self.canvas.create_line(
+			food_left + CELL_SIZE // 2,
+			food_top + 5,
+			food_left + CELL_SIZE // 2 + 2,
+			food_top + 1,
+			fill="#5b351d",
+			width=2,
+		)
+		self.canvas.create_oval(
+			food_left + CELL_SIZE // 2 + 2,
+			food_top + 1,
+			food_left + CELL_SIZE - 4,
+			food_top + 5,
+			fill="#65a854",
+			outline="",
+		)
+		coin_x, coin_y = self.coin
+		coin_left = coin_x * CELL_SIZE
+		coin_top = coin_y * CELL_SIZE
+		self.canvas.create_oval(
+			coin_left + 4,
+			coin_top + 4,
+			coin_left + CELL_SIZE - 4,
+			coin_top + CELL_SIZE - 4,
+			fill="#f5b942",
+			outline="#ffe08a",
+			width=2,
+		)
+		self.canvas.create_text(
+			coin_left + CELL_SIZE // 2,
+			coin_top + CELL_SIZE // 2,
+			text="C",
+			fill="#9b6413",
+			font=("Arial", 8, "bold"),
+		)
 
-# Pyre type checker
-.pyre/
+		for index, (x, y) in enumerate(self.snake):
+			head_color, body_color, _ = SNAKE_SKINS[self.selected_snake]
+			color = head_color if index == 0 else body_color
+			left = x * CELL_SIZE + 1
+			top = y * CELL_SIZE + 1
+			right = (x + 1) * CELL_SIZE - 1
+			bottom = (y + 1) * CELL_SIZE - 1
+			self.canvas.create_oval(
+				left,
+				top,
+				right,
+				bottom,
+				fill=color,
+				outline="#236b35",
+				width=2,
+			)
+			self.canvas.create_oval(
+				left + 4,
+				top + 3,
+				right - 7,
+				bottom - 8,
+				fill="#c7f28a" if index == 0 else "#75bd59",
+				outline="",
+			)
+			if index == 0:
+				self.draw_snake_eyes(x, y)
+				self.draw_snake_tongue(x, y)
 
-# pytype static type analyzer
-.pytype/
+	def draw_snake_eyes(self, x, y):
+		center_x = x * CELL_SIZE + CELL_SIZE // 2
+		center_y = y * CELL_SIZE + CELL_SIZE // 2
+		offset_x = self.direction[0] * 3
+		offset_y = self.direction[1] * 3
+		for side in (-1, 1):
+			eye_x = center_x + offset_x + (side * (4 if self.direction[1] else 0))
+			eye_y = center_y + offset_y + (side * (4 if self.direction[0] else 0))
+			self.canvas.create_oval(
+				eye_x - 2,
+				eye_y - 2,
+				eye_x + 2,
+				eye_y + 2,
+				fill="white",
+				outline="",
+			)
+			self.canvas.create_oval(
+				eye_x - 1,
+				eye_y - 1,
+				eye_x + 1,
+				eye_y + 1,
+				fill="#18251b",
+				outline="",
+			)
 
-# Cython debug symbols
-cython_debug/
+	def draw_snake_tongue(self, x, y):
+		center_x = x * CELL_SIZE + CELL_SIZE // 2
+		center_y = y * CELL_SIZE + CELL_SIZE // 2
+		start_x = center_x + self.direction[0] * 7
+		start_y = center_y + self.direction[1] * 7
+		end_x = center_x + self.direction[0] * 13
+		end_y = center_y + self.direction[1] * 13
+		self.canvas.create_line(start_x, start_y, end_x, end_y, fill="#e84a5f", width=1)
+		self.canvas.create_line(
+			end_x,
+			end_y,
+			end_x + (self.direction[1] * 3),
+			end_y - (self.direction[0] * 3),
+			fill="#e84a5f",
+			width=1,
+		)
+		self.canvas.create_line(
+			end_x,
+			end_y,
+			end_x - (self.direction[1] * 3),
+			end_y + (self.direction[0] * 3),
+			fill="#e84a5f",
+			width=1,
+		)
+	def end_game(self):
+		self.game_over = True
+		self.death_animation_id += 1
+		animation_id = self.death_animation_id
+		self.play_death_effect(animation_id, 0)
 
-# PyCharm
-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#   and can be added to the global gitignore or merged into this file.  For a more nuclear
-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.
-# .idea/
+	def play_death_effect(self, animation_id, frame):
+		if animation_id != self.death_animation_id:
+			return
 
-# Abstra
-#   Abstra is an AI-powered process automation framework.
-#   Ignore directories containing user credentials, local state, and settings.
-#   Learn more at https://abstra.io/docs
-.abstra/
+		self.canvas.delete("all")
+		flash_colors = ["#101820", "#7d2020", "#101820", "#a92d2d"]
+		self.canvas.configure(bg=flash_colors[frame % len(flash_colors)])
+		self.draw_grenade_explosion(frame)
+		self.draw_blood_effect(frame)
+		for x, y in self.snake:
+			self.canvas.create_rectangle(
+				x * CELL_SIZE + 1,
+				y * CELL_SIZE + 1,
+				(x + 1) * CELL_SIZE - 1,
+				(y + 1) * CELL_SIZE - 1,
+				fill="#ff4d4d",
+				outline="#ffd1d1",
+			)
 
-# Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#   you could uncomment the following to ignore the entire vscode folder
-# .vscode/
-# Temporary file for partial code execution
-tempCodeRunnerFile.py
+		if frame < 8:
+			self.root.after(70, lambda: self.play_death_effect(animation_id, frame + 1))
+			return
 
-# Ruff stuff:
-.ruff_cache/
+		self.canvas.configure(bg="#101820")
+		self.draw_game_over_blood()
+		self.canvas.create_text(
+			GRID_WIDTH * CELL_SIZE // 2,
+			GRID_HEIGHT * CELL_SIZE // 2 - 15,
+			text="GAME OVER",
+			fill="#8b0000",
+			font=("Impact", 42),
+		)
+		self.root.bind("<KeyPress-r>", lambda event: self.start_game())
+		self.root.bind("<KeyPress-R>", lambda event: self.start_game())
 
-# PyPI configuration file
-.pypirc
+	def draw_game_over_blood(self):
+		center_x = GRID_WIDTH * CELL_SIZE // 2
+		center_y = GRID_HEIGHT * CELL_SIZE // 2 - 15
+		drops = [
+			(-180, -85, 8), (-145, 70, 5), (-105, -110, 4), (-62, 92, 7),
+			(58, -98, 5), (112, 82, 8), (156, -66, 4), (195, 42, 6),
+			(-220, 15, 3), (225, -18, 3),
+		]
+		self.canvas.create_oval(
+			center_x - 250,
+			center_y - 78,
+			center_x + 250,
+			center_y + 78,
+			fill="#250b12",
+			outline="#5c0a0a",
+			width=3,
+		)
+		for offset_x, offset_y, size in drops:
+			drop_x = center_x + offset_x
+			drop_y = center_y + offset_y
+			self.canvas.create_oval(
+				drop_x - size,
+				drop_y - size,
+				drop_x + size,
+				drop_y + size,
+				fill="#a4161a",
+				outline="#5c0a0a",
+			)
 
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+	def draw_blood_effect(self, frame):
+		center_x = self.snake[0][0] * CELL_SIZE + CELL_SIZE // 2
+		center_y = self.snake[0][1] * CELL_SIZE + CELL_SIZE // 2
+		drops = [
+			(-34, -18, 4), (-25, 20, 3), (-11, -31, 3), (8, 28, 4),
+			(23, -24, 3), (35, 8, 4), (-42, 4, 2), (16, 42, 2),
+		]
+		spread = min(frame * 2, 12)
+		for offset_x, offset_y, size in drops:
+			drop_x = center_x + offset_x + (spread if offset_x > 0 else -spread)
+			drop_y = center_y + offset_y + (spread if offset_y > 0 else -spread)
+			self.canvas.create_oval(
+				drop_x - size,
+				drop_y - size,
+				drop_x + size,
+				drop_y + size,
+				fill="#a4161a",
+				outline="#5c0a0a",
+			)
+		self.canvas.create_line(
+			center_x - 16,
+			center_y + 3,
+			center_x + 18 + spread,
+			center_y - 8,
+			fill="#b11226",
+			width=3,
+		)
 
-# Streamlit
-.streamlit/secrets.toml
+	def draw_grenade_explosion(self, frame):
+		center_x = self.snake[0][0] * CELL_SIZE + CELL_SIZE // 2
+		center_y = self.snake[0][1] * CELL_SIZE + CELL_SIZE // 2
+		radius = 8 + frame * 9
+		self.canvas.create_oval(
+			center_x - radius,
+			center_y - radius,
+			center_x + radius,
+			center_y + radius,
+			outline="#ffb000",
+			width=3,
+		)
+		if frame < 5:
+			self.canvas.create_oval(
+				center_x - 12,
+				center_y - 12,
+				center_x + 12,
+				center_y + 12,
+				fill="#fff1a8",
+				outline="#ff6b35",
+				width=2,
+			)
+
+		for index in range(12):
+			angle = index * 0.52
+			particle_distance = radius + 5 + (index % 3) * 4
+			particle_x = center_x + int(particle_distance * __import__("math").cos(angle))
+			particle_y = center_y + int(particle_distance * __import__("math").sin(angle))
+			particle_size = 2 if index % 2 else 3
+			self.canvas.create_oval(
+				particle_x - particle_size,
+				particle_y - particle_size,
+				particle_x + particle_size,
+				particle_y + particle_size,
+				fill="#ffd166",
+				outline="",
+			)
+
+
+if __name__ == "__main__":
+	window = tk.Tk()
+	SnakeGame(window)
+	window.mainloop()
